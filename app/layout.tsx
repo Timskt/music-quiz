@@ -12,8 +12,8 @@ const _spaceMono = Space_Mono({
 })
 
 export const metadata: Metadata = {
-  title: 'MusicQ - Guess the Artist',
-  description: 'Test your music knowledge! Listen to songs and guess the artist in Fan Mode or Random Mode.',
+  title: '听歌猜猜猜 - 音乐答题挑战',
+  description: '选择粉丝专场或随机专场，听一段旋律猜歌手或歌曲名，测试你的音乐知识！',
 }
 
 export const viewport: Viewport = {

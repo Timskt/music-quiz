@@ -12,7 +12,8 @@ interface Question {
   previewUrl: string;
   albumCover: string;
   albumTitle: string;
-  correctArtist: string;
+  correctAnswer: string;
+  artistName: string;
   artistImage: string;
   options: string[];
 }
@@ -26,44 +27,61 @@ export function QuizGame() {
   const [correctCount, setCorrectCount] = useState(0);
   const [mode, setMode] = useState<"fan" | "random">("random");
   const [artistName, setArtistName] = useState<string>("");
+  const [artistId, setArtistId] = useState<number | null>(null);
+  const [questionCount, setQuestionCount] = useState(10);
   const [error, setError] = useState<string | null>(null);
 
+  const fetchQuiz = useCallback(
+    async (quizMode: "fan" | "random", count: number, artId?: number) => {
+      const params = new URLSearchParams({
+        mode: quizMode,
+        count: String(count),
+      });
+      if (artId) params.set("artistId", String(artId));
+
+      const res = await fetch(`/api/music/quiz?${params.toString()}`);
+      const data = await res.json();
+
+      if (!res.ok || !data.questions || data.questions.length === 0) {
+        throw new Error(data.error || "获取题目失败，请重试。");
+      }
+      return data.questions as Question[];
+    },
+    []
+  );
+
   const startQuiz = useCallback(
-    async (quizMode: "fan" | "random", artistId?: number, name?: string) => {
+    async (
+      quizMode: "fan" | "random",
+      count: number,
+      artId?: number,
+      name?: string
+    ) => {
       setGameState("loading");
       setMode(quizMode);
       setArtistName(name || "");
+      setArtistId(artId || null);
+      setQuestionCount(count);
       setCurrentIndex(0);
       setCorrectCount(0);
       setError(null);
 
       try {
-        const params = new URLSearchParams({ mode: quizMode });
-        if (artistId) params.set("artistId", String(artistId));
-
-        const res = await fetch(`/api/music/quiz?${params.toString()}`);
-        const data = await res.json();
-
-        if (!res.ok || !data.questions || data.questions.length === 0) {
-          setError(data.error || "No songs found. Please try again.");
-          setGameState("menu");
-          return;
-        }
-
-        setQuestions(data.questions);
+        const qs = await fetchQuiz(quizMode, count, artId);
+        setQuestions(qs);
         setGameState("playing");
-      } catch {
-        setError("Network error. Please check your connection and try again.");
+      } catch (err) {
+        setError(
+          err instanceof Error ? err.message : "网络错误，请检查网络后重试。"
+        );
         setGameState("menu");
       }
     },
-    []
+    [fetchQuiz]
   );
 
   const handleAnswer = useCallback((isCorrect: boolean) => {
-    if (isCorrect) {
-      setCorrectCount((c) => c + 1);
-    }
+    if (isCorrect) setCorrectCount((c) => c + 1);
   }, []);
 
   const handleNext = useCallback(() => {
@@ -74,30 +92,23 @@ export function QuizGame() {
     }
   }, [currentIndex, questions.length]);
 
-  const handleRestart = useCallback(() => {
+  const handleRestart = useCallback(async () => {
+    setGameState("loading");
     setCurrentIndex(0);
     setCorrectCount(0);
-    setGameState("loading");
-    // Re-fetch questions
-    const params = new URLSearchParams({ mode });
-    if (mode === "fan" && questions[0]) {
-      // We need to refetch, but we don't have artistId stored separately
-      // So go back to menu for fan mode
+
+    try {
+      const qs = await fetchQuiz(
+        mode,
+        questionCount,
+        artistId || undefined
+      );
+      setQuestions(qs);
+      setGameState("playing");
+    } catch {
       setGameState("menu");
-      return;
     }
-    fetch(`/api/music/quiz?${params.toString()}`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.questions && data.questions.length > 0) {
-          setQuestions(data.questions);
-          setGameState("playing");
-        } else {
-          setGameState("menu");
-        }
-      })
-      .catch(() => setGameState("menu"));
-  }, [mode, questions]);
+  }, [mode, questionCount, artistId, fetchQuiz]);
 
   const handleHome = useCallback(() => {
     setGameState("menu");
@@ -108,19 +119,17 @@ export function QuizGame() {
   }, []);
 
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center p-4">
+    <main className="flex min-h-dvh flex-col items-center justify-center px-4 py-6 sm:p-6">
       <div className="w-full max-w-lg">
-        {/* Error message */}
+        {/* Error */}
         {error && (
-          <div className="mb-6 rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive animate-slide-up">
+          <div className="mb-4 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive animate-slide-up">
             {error}
           </div>
         )}
 
-        {/* Menu */}
         {gameState === "menu" && <ModeSelector onStartQuiz={startQuiz} />}
 
-        {/* Loading */}
         {gameState === "loading" && (
           <div className="flex flex-col items-center gap-6 py-20">
             <div className="relative">
@@ -131,12 +140,11 @@ export function QuizGame() {
             </div>
             <div className="flex items-center gap-2 text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin" />
-              <span>Loading songs...</span>
+              <span className="text-sm">{"正在加载歌曲..."}</span>
             </div>
           </div>
         )}
 
-        {/* Playing */}
         {gameState === "playing" && questions[currentIndex] && (
           <QuizQuestion
             key={questions[currentIndex].id}
@@ -146,13 +154,15 @@ export function QuizGame() {
             previewUrl={questions[currentIndex].previewUrl}
             albumCover={questions[currentIndex].albumCover}
             options={questions[currentIndex].options}
-            correctArtist={questions[currentIndex].correctArtist}
+            correctAnswer={questions[currentIndex].correctAnswer}
+            mode={mode}
+            artistName={questions[currentIndex].artistName}
+            artistImage={questions[currentIndex].artistImage}
             onAnswer={handleAnswer}
             onNext={handleNext}
           />
         )}
 
-        {/* Results */}
         {gameState === "results" && (
           <QuizResults
             correctCount={correctCount}
