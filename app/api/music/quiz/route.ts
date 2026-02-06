@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { t2s } from "@/lib/t2s";
 
 interface DeezerTrack {
   id: number;
@@ -149,7 +150,7 @@ async function fetchArtistInfo(
     const res = await fetch(`https://api.deezer.com/artist/${artistId}`);
     const data = await res.json();
     return data.name
-      ? { name: data.name, picture_medium: data.picture_medium }
+      ? { name: t2s(data.name), picture_medium: data.picture_medium }
       : null;
   } catch {
     return null;
@@ -273,16 +274,16 @@ export async function GET(request: NextRequest) {
         );
       }
 
-      // All unique song titles from this artist for option generation
+      // All unique song titles from this artist for option generation (simplified)
       const allArtistTitles = [
-        ...new Set(tracks.map((t) => t.title_short || t.title)),
+        ...new Set(tracks.map((t) => t2s(t.title_short || t.title))),
       ];
 
-      // Fetch chart tracks as extra fallback for options only
+      // Fetch chart tracks as extra fallback for options only (simplified)
       const chartTracks = await fetchChartTracks();
       const chartTitles = chartTracks
         .filter((t) => t.artist.id !== Number(artistId))
-        .map((t) => t.title_short || t.title);
+        .map((t) => t2s(t.title_short || t.title));
 
       const shuffled = shuffle(tracks);
       const actualCount = Math.min(count, shuffled.length);
@@ -290,15 +291,15 @@ export async function GET(request: NextRequest) {
 
       const questions = selected.map((track) => ({
         id: track.id,
-        songTitle: track.title_short || track.title,
+        songTitle: t2s(track.title_short || track.title),
         previewUrl: track.preview,
         albumCover: track.album?.cover_medium || "",
-        albumTitle: track.album?.title || "",
-        correctAnswer: track.title_short || track.title,
-        artistName: track.artist.name,
+        albumTitle: t2s(track.album?.title || ""),
+        correctAnswer: t2s(track.title_short || track.title),
+        artistName: t2s(track.artist.name),
         artistImage: track.artist.picture_medium,
         options: generateFanSongOptions(
-          track.title_short || track.title,
+          t2s(track.title_short || track.title),
           allArtistTitles,
           chartTitles
         ),
@@ -321,7 +322,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const allArtistNames = [...new Set(tracks.map((t) => t.artist.name))];
+    const allArtistNames = [...new Set(tracks.map((t) => t2s(t.artist.name)))];
 
     const extraIds = shuffle(
       POPULAR_ARTIST_IDS.filter(
@@ -331,19 +332,19 @@ export async function GET(request: NextRequest) {
 
     const extraPromises = extraIds.map((id) => fetchArtistInfo(id));
     const extras = await Promise.all(extraPromises);
-    const extraNames = extras.filter(Boolean).map((a) => a!.name);
+    const extraNames = extras.filter(Boolean).map((a) => t2s(a!.name));
 
     const questions = tracks.map((track) => ({
       id: track.id,
-      songTitle: track.title_short || track.title,
+      songTitle: t2s(track.title_short || track.title),
       previewUrl: track.preview,
       albumCover: track.album?.cover_medium || "",
-      albumTitle: track.album?.title || "",
-      correctAnswer: track.artist.name,
-      artistName: track.artist.name,
+      albumTitle: t2s(track.album?.title || ""),
+      correctAnswer: t2s(track.artist.name),
+      artistName: t2s(track.artist.name),
       artistImage: track.artist.picture_medium,
       options: generateArtistOptions(
-        track.artist.name,
+        t2s(track.artist.name),
         allArtistNames,
         extraNames
       ),
