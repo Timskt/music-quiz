@@ -11,17 +11,17 @@ interface DeezerTrack {
     picture_medium: string;
   };
   album: {
+    id: number;
     title: string;
     cover_medium: string;
   };
 }
 
-interface DeezerResponse {
-  data: DeezerTrack[];
-  total: number;
+interface DeezerAlbum {
+  id: number;
+  title: string;
 }
 
-// Expanded pool: 50 popular artists for richer random mode and option generation
 const POPULAR_ARTIST_IDS = [
   27, 75798, 13, 384236, 246791, 12246, 1562681, 230,
   4050205, 5575980, 288166, 4495517, 5313805, 339209,
@@ -30,35 +30,6 @@ const POPULAR_ARTIST_IDS = [
   15166, 429675, 8354140, 4210, 892, 301, 7757, 1518934,
   163, 9635624, 4491972, 1302232, 11110, 293585, 2589990,
   449, 9799821, 68, 5479714, 1139,
-];
-
-// Fallback song titles pool for fan mode distractors
-const FALLBACK_SONG_TITLES = [
-  "Shape of You", "Blinding Lights", "Rolling in the Deep",
-  "Bohemian Rhapsody", "Billie Jean", "Smells Like Teen Spirit",
-  "Hotel California", "Imagine", "Yesterday", "Let It Be",
-  "Wonderwall", "Stairway to Heaven", "Lose Yourself",
-  "Someone Like You", "Uptown Funk", "Old Town Road",
-  "Bad Guy", "Havana", "Shallow", "Perfect",
-  "Despacito", "Sorry", "Closer", "Starboy",
-  "Watermelon Sugar", "Levitating", "Stay", "Peaches",
-  "drivers license", "Good 4 U", "Kiss Me More", "Montero",
-  "As It Was", "Anti-Hero", "Flowers", "Cruel Summer",
-  "Die For You", "Kill Bill", "Unholy", "Vampire",
-];
-
-// Fallback artist names pool for random mode distractors
-const FALLBACK_ARTIST_NAMES = [
-  "Adele", "Drake", "Taylor Swift", "Ed Sheeran",
-  "Beyonce", "Eminem", "Rihanna", "Bruno Mars",
-  "The Weeknd", "Ariana Grande", "Coldplay", "Lady Gaga",
-  "Billie Eilish", "Post Malone", "Dua Lipa", "Justin Bieber",
-  "Kanye West", "Kendrick Lamar", "Bad Bunny", "Harry Styles",
-  "Olivia Rodrigo", "SZA", "Doja Cat", "Lil Nas X",
-  "BTS", "BLACKPINK", "Travis Scott", "The Chainsmokers",
-  "Imagine Dragons", "Maroon 5", "Sam Smith", "Shawn Mendes",
-  "Miley Cyrus", "Selena Gomez", "Cardi B", "Megan Thee Stallion",
-  "Lizzo", "Demi Lovato", "Halsey", "Lana Del Rey",
 ];
 
 const OPTION_COUNT = 6;
@@ -72,19 +43,100 @@ function shuffle<T>(arr: T[]): T[] {
   return copy;
 }
 
-async function fetchArtistTracks(artistId: number, limit = 100): Promise<DeezerTrack[]> {
-  const res = await fetch(
-    `https://api.deezer.com/artist/${artistId}/top?limit=${limit}`
+// Deduplicate tracks by title (case-insensitive, trimmed)
+function dedupeTracksByTitle(tracks: DeezerTrack[]): DeezerTrack[] {
+  const seen = new Set<string>();
+  return tracks.filter((t) => {
+    const key = (t.title_short || t.title).toLowerCase().trim();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+// Fetch top tracks of an artist
+async function fetchArtistTopTracks(artistId: number): Promise<DeezerTrack[]> {
+  try {
+    const res = await fetch(
+      `https://api.deezer.com/artist/${artistId}/top?limit=100`
+    );
+    const data = await res.json();
+    return (data.data || []).filter((t: DeezerTrack) => t.preview);
+  } catch {
+    return [];
+  }
+}
+
+// Fetch all albums of an artist
+async function fetchArtistAlbums(artistId: number): Promise<DeezerAlbum[]> {
+  try {
+    const res = await fetch(
+      `https://api.deezer.com/artist/${artistId}/albums?limit=50`
+    );
+    const data = await res.json();
+    return data.data || [];
+  } catch {
+    return [];
+  }
+}
+
+// Fetch tracks from a specific album
+async function fetchAlbumTracks(albumId: number): Promise<DeezerTrack[]> {
+  try {
+    const res = await fetch(
+      `https://api.deezer.com/album/${albumId}/tracks?limit=50`
+    );
+    const data = await res.json();
+    return (data.data || []).filter((t: DeezerTrack) => t.preview);
+  } catch {
+    return [];
+  }
+}
+
+// Get the FULL discography of an artist: top tracks + all album tracks
+async function fetchFullArtistTracks(artistId: number): Promise<DeezerTrack[]> {
+  // Step 1: get top tracks
+  const topTracks = await fetchArtistTopTracks(artistId);
+
+  // Step 2: get all albums
+  const albums = await fetchArtistAlbums(artistId);
+
+  // Step 3: fetch tracks from each album in parallel (max 15 albums to stay fast)
+  const albumsToFetch = albums.slice(0, 15);
+  const albumTrackResults = await Promise.all(
+    albumsToFetch.map((album) => fetchAlbumTracks(album.id))
   );
-  const data: DeezerResponse = await res.json();
-  return (data.data || []).filter((t) => t.preview);
+
+  // Step 4: merge and enrich album tracks with artist info from top tracks
+  const allTracks: DeezerTrack[] = [...topTracks];
+  const existingIds = new Set(topTracks.map((t) => t.id));
+
+  // We need artist info for album tracks (album endpoint doesn't always include full artist info)
+  const artistInfo = topTracks.length > 0
+    ? topTracks[0].artist
+    : { id: artistId, name: "", picture_medium: "" };
+
+  for (const albumTracks of albumTrackResults) {
+    for (const track of albumTracks) {
+      if (!existingIds.has(track.id)) {
+        // Ensure artist info is present
+        if (!track.artist || !track.artist.name) {
+          track.artist = artistInfo;
+        }
+        allTracks.push(track);
+        existingIds.add(track.id);
+      }
+    }
+  }
+
+  return dedupeTracksByTitle(allTracks);
 }
 
 async function fetchChartTracks(): Promise<DeezerTrack[]> {
   try {
     const res = await fetch("https://api.deezer.com/chart/0/tracks?limit=100");
-    const data: DeezerResponse = await res.json();
-    return (data.data || []).filter((t) => t.preview);
+    const data = await res.json();
+    return (data.data || []).filter((t: DeezerTrack) => t.preview);
   } catch {
     return [];
   }
@@ -105,7 +157,6 @@ async function fetchArtistInfo(
 }
 
 async function fetchRandomTracks(count: number): Promise<DeezerTrack[]> {
-  // Fetch from more artists to ensure we have enough unique tracks
   const shuffledArtists = shuffle(POPULAR_ARTIST_IDS);
   const artistCount = Math.min(Math.ceil(count * 2.5), shuffledArtists.length);
   const selectedArtists = shuffledArtists.slice(0, artistCount);
@@ -115,7 +166,7 @@ async function fetchRandomTracks(count: number): Promise<DeezerTrack[]> {
   const results = await Promise.all(
     selectedArtists.map(async (artistId) => {
       try {
-        const tracks = await fetchArtistTracks(artistId, 30);
+        const tracks = await fetchArtistTopTracks(artistId);
         if (tracks.length > 0) {
           return shuffle(tracks).slice(0, 3);
         }
@@ -130,7 +181,6 @@ async function fetchRandomTracks(count: number): Promise<DeezerTrack[]> {
     allTracks.push(...tracks);
   }
 
-  // Also fetch chart tracks as backup
   if (allTracks.length < count) {
     const chartTracks = await fetchChartTracks();
     const existing = new Set(allTracks.map((t) => t.id));
@@ -145,42 +195,39 @@ async function fetchRandomTracks(count: number): Promise<DeezerTrack[]> {
   return shuffle(allTracks).slice(0, count);
 }
 
-function generateSongTitleOptions(
+// Fan mode: options are primarily from the artist's own discography
+function generateFanSongOptions(
   correctTitle: string,
-  allTitles: string[],
-  fallbackTitles: string[]
+  allArtistTitles: string[],
+  chartTitles: string[]
 ): string[] {
   const options = new Set<string>();
   options.add(correctTitle);
 
-  // First draw from the artist's other songs (shuffled)
-  const others = shuffle(allTitles.filter((t) => t !== correctTitle));
-  for (const title of others) {
+  // Priority 1: use OTHER songs from the same artist (shuffled for randomness)
+  const ownSongs = shuffle(
+    allArtistTitles.filter((t) => t !== correctTitle)
+  );
+  for (const title of ownSongs) {
     if (options.size >= OPTION_COUNT) break;
     options.add(title);
   }
 
-  // If still not enough, draw from fallback pool (external distractors)
-  const fallbacks = shuffle(
-    fallbackTitles.filter((t) => t !== correctTitle && !options.has(t))
-  );
-  for (const title of fallbacks) {
-    if (options.size >= OPTION_COUNT) break;
-    options.add(title);
-  }
-
-  // Last resort: use the static pool
-  const staticFallbacks = shuffle(
-    FALLBACK_SONG_TITLES.filter((t) => t !== correctTitle && !options.has(t))
-  );
-  for (const title of staticFallbacks) {
-    if (options.size >= OPTION_COUNT) break;
-    options.add(title);
+  // Priority 2: if artist doesn't have enough songs, use chart songs as fallback
+  if (options.size < OPTION_COUNT) {
+    const fallbacks = shuffle(
+      chartTitles.filter((t) => !options.has(t))
+    );
+    for (const title of fallbacks) {
+      if (options.size >= OPTION_COUNT) break;
+      options.add(title);
+    }
   }
 
   return shuffle(Array.from(options));
 }
 
+// Random mode: options are artist names
 function generateArtistOptions(
   correctArtist: string,
   allArtists: string[],
@@ -189,27 +236,16 @@ function generateArtistOptions(
   const options = new Set<string>();
   options.add(correctArtist);
 
-  // Draw from other artists in the quiz pool
   const others = shuffle(allArtists.filter((a) => a !== correctArtist));
   for (const artist of others) {
     if (options.size >= OPTION_COUNT) break;
     options.add(artist);
   }
 
-  // Draw from extra artist names
   const extras = shuffle(
     extraArtists.filter((a) => a !== correctArtist && !options.has(a))
   );
   for (const artist of extras) {
-    if (options.size >= OPTION_COUNT) break;
-    options.add(artist);
-  }
-
-  // Last resort static pool
-  const fallbacks = shuffle(
-    FALLBACK_ARTIST_NAMES.filter((a) => a !== correctArtist && !options.has(a))
-  );
-  for (const artist of fallbacks) {
     if (options.size >= OPTION_COUNT) break;
     options.add(artist);
   }
@@ -228,8 +264,8 @@ export async function GET(request: NextRequest) {
 
   try {
     if (mode === "fan" && artistId) {
-      // Fan mode: play songs from specific artist, guess song title
-      const tracks = await fetchArtistTracks(Number(artistId), 100);
+      // Fan mode: fetch FULL discography (top tracks + album tracks)
+      const tracks = await fetchFullArtistTracks(Number(artistId));
       if (tracks.length === 0) {
         return NextResponse.json(
           { error: "未找到该歌手的歌曲，请换一位歌手试试。" },
@@ -237,30 +273,33 @@ export async function GET(request: NextRequest) {
         );
       }
 
-      // Fetch chart tracks for distractor song titles
+      // All unique song titles from this artist for option generation
+      const allArtistTitles = [
+        ...new Set(tracks.map((t) => t.title_short || t.title)),
+      ];
+
+      // Fetch chart tracks as extra fallback for options only
       const chartTracks = await fetchChartTracks();
       const chartTitles = chartTracks
         .filter((t) => t.artist.id !== Number(artistId))
         .map((t) => t.title_short || t.title);
 
       const shuffled = shuffle(tracks);
-      // Ensure we don't exceed available track count
       const actualCount = Math.min(count, shuffled.length);
       const selected = shuffled.slice(0, actualCount);
-      const allTitles = tracks.map((t) => t.title_short || t.title);
 
       const questions = selected.map((track) => ({
         id: track.id,
         songTitle: track.title_short || track.title,
         previewUrl: track.preview,
-        albumCover: track.album.cover_medium,
-        albumTitle: track.album.title,
+        albumCover: track.album?.cover_medium || "",
+        albumTitle: track.album?.title || "",
         correctAnswer: track.title_short || track.title,
         artistName: track.artist.name,
         artistImage: track.artist.picture_medium,
-        options: generateSongTitleOptions(
+        options: generateFanSongOptions(
           track.title_short || track.title,
-          allTitles,
+          allArtistTitles,
           chartTitles
         ),
       }));
@@ -269,6 +308,7 @@ export async function GET(request: NextRequest) {
         questions,
         total: questions.length,
         requestedCount: count,
+        totalAvailable: tracks.length,
       });
     }
 
@@ -283,7 +323,6 @@ export async function GET(request: NextRequest) {
 
     const allArtistNames = [...new Set(tracks.map((t) => t.artist.name))];
 
-    // Fetch extra artist names for diverse distractors
     const extraIds = shuffle(
       POPULAR_ARTIST_IDS.filter(
         (id) => !tracks.some((t) => t.artist.id === id)
@@ -298,12 +337,16 @@ export async function GET(request: NextRequest) {
       id: track.id,
       songTitle: track.title_short || track.title,
       previewUrl: track.preview,
-      albumCover: track.album.cover_medium,
-      albumTitle: track.album.title,
+      albumCover: track.album?.cover_medium || "",
+      albumTitle: track.album?.title || "",
       correctAnswer: track.artist.name,
       artistName: track.artist.name,
       artistImage: track.artist.picture_medium,
-      options: generateArtistOptions(track.artist.name, allArtistNames, extraNames),
+      options: generateArtistOptions(
+        track.artist.name,
+        allArtistNames,
+        extraNames
+      ),
     }));
 
     return NextResponse.json({

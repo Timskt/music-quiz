@@ -30,7 +30,7 @@ export function QuizGame() {
   const [artistId, setArtistId] = useState<number | null>(null);
   const [questionCount, setQuestionCount] = useState(10);
   const [error, setError] = useState<string | null>(null);
-  const [warning, setWarning] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
 
   const fetchQuiz = useCallback(
     async (quizMode: "fan" | "random", count: number, artId?: number) => {
@@ -47,13 +47,12 @@ export function QuizGame() {
         throw new Error(data.error || "获取题目失败，请重试。");
       }
 
-      // Warn if fewer questions returned than requested
-      let warnMsg: string | null = null;
+      let infoMsg: string | null = null;
       if (data.questions.length < count) {
-        warnMsg = `该歌手可试听的歌曲较少，本轮共 ${data.questions.length} 题`;
+        infoMsg = `该歌手可用歌曲共 ${data.totalAvailable || data.questions.length} 首，本轮出题 ${data.questions.length} 道`;
       }
 
-      return { questions: data.questions as Question[], warning: warnMsg };
+      return { questions: data.questions as Question[], info: infoMsg };
     },
     []
   );
@@ -73,12 +72,12 @@ export function QuizGame() {
       setCurrentIndex(0);
       setCorrectCount(0);
       setError(null);
-      setWarning(null);
+      setInfo(null);
 
       try {
         const result = await fetchQuiz(quizMode, count, artId);
         setQuestions(result.questions);
-        setWarning(result.warning);
+        setInfo(result.info);
         setGameState("playing");
       } catch (err) {
         setError(
@@ -95,7 +94,6 @@ export function QuizGame() {
   }, []);
 
   const handleNext = useCallback(() => {
-    setWarning(null);
     if (currentIndex < questions.length - 1) {
       setCurrentIndex((i) => i + 1);
     } else {
@@ -107,7 +105,7 @@ export function QuizGame() {
     setGameState("loading");
     setCurrentIndex(0);
     setCorrectCount(0);
-    setWarning(null);
+    setInfo(null);
 
     try {
       const result = await fetchQuiz(
@@ -116,7 +114,7 @@ export function QuizGame() {
         artistId || undefined
       );
       setQuestions(result.questions);
-      setWarning(result.warning);
+      setInfo(result.info);
       setGameState("playing");
     } catch {
       setGameState("menu");
@@ -129,23 +127,23 @@ export function QuizGame() {
     setCurrentIndex(0);
     setCorrectCount(0);
     setError(null);
-    setWarning(null);
+    setInfo(null);
   }, []);
 
   return (
     <main className="flex min-h-dvh flex-col items-center justify-center px-3 py-4 sm:px-6 sm:py-6">
       <div className="w-full max-w-lg">
         {/* Error */}
-        {error && (
-          <div className="mb-4 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive animate-slide-up">
+        {error && gameState === "menu" && (
+          <div className="mb-4 rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive animate-slide-up">
             {error}
           </div>
         )}
 
-        {/* Warning */}
-        {warning && gameState === "playing" && currentIndex === 0 && (
-          <div className="mb-3 rounded-lg border border-chart-3/30 bg-chart-3/10 p-2.5 text-xs text-chart-3 animate-slide-up">
-            {warning}
+        {/* Info banner during play */}
+        {info && gameState === "playing" && currentIndex === 0 && (
+          <div className="mb-3 rounded-xl border border-chart-3/30 bg-chart-3/10 p-2.5 text-xs text-chart-3 animate-slide-up">
+            {info}
           </div>
         )}
 
@@ -159,9 +157,14 @@ export function QuizGame() {
               </div>
               <div className="absolute inset-0 rounded-full border-2 border-primary/30 animate-pulse-ring" />
             </div>
-            <div className="flex items-center gap-2 text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              <span className="text-sm">{"正在准备题目..."}</span>
+            <div className="flex flex-col items-center gap-2 text-muted-foreground">
+              <div className="flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span className="text-sm">{"正在准备题目..."}</span>
+              </div>
+              <span className="text-xs text-muted-foreground/60">
+                {"正在获取歌手完整曲库，请稍候"}
+              </span>
             </div>
           </div>
         )}
