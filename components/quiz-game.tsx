@@ -19,21 +19,43 @@ interface Question {
 }
 
 type GameState = "menu" | "loading" | "playing" | "results";
+type GameMode = "fan" | "random" | "custom";
 
 export function QuizGame() {
   const [gameState, setGameState] = useState<GameState>("menu");
   const [questions, setQuestions] = useState<Question[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [correctCount, setCorrectCount] = useState(0);
-  const [mode, setMode] = useState<"fan" | "random">("random");
+  const [mode, setMode] = useState<GameMode>("random");
   const [artistName, setArtistName] = useState<string>("");
   const [artistId, setArtistId] = useState<number | null>(null);
   const [questionCount, setQuestionCount] = useState(10);
+  const [customTrackIds, setCustomTrackIds] = useState<number[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
 
   const fetchQuiz = useCallback(
-    async (quizMode: "fan" | "random", count: number, artId?: number) => {
+    async (
+      quizMode: GameMode,
+      count: number,
+      artId?: number,
+      trackIds?: number[]
+    ) => {
+      if (quizMode === "custom" && trackIds && trackIds.length > 0) {
+        const params = new URLSearchParams({
+          mode: "custom",
+          trackIds: trackIds.join(","),
+        });
+        const res = await fetch(`/api/music/quiz?${params.toString()}`);
+        const data = await res.json();
+
+        if (!res.ok || !data.questions || data.questions.length === 0) {
+          throw new Error(data.error || "获取题目失败，请重试。");
+        }
+
+        return { questions: data.questions as Question[], info: null };
+      }
+
       const params = new URLSearchParams({
         mode: quizMode,
         count: String(count),
@@ -69,6 +91,7 @@ export function QuizGame() {
       setArtistName(name || "");
       setArtistId(artId || null);
       setQuestionCount(count);
+      setCustomTrackIds([]);
       setCurrentIndex(0);
       setCorrectCount(0);
       setError(null);
@@ -76,6 +99,34 @@ export function QuizGame() {
 
       try {
         const result = await fetchQuiz(quizMode, count, artId);
+        setQuestions(result.questions);
+        setInfo(result.info);
+        setGameState("playing");
+      } catch (err) {
+        setError(
+          err instanceof Error ? err.message : "网络错误，请检查网络后重试。"
+        );
+        setGameState("menu");
+      }
+    },
+    [fetchQuiz]
+  );
+
+  const startCustomQuiz = useCallback(
+    async (trackIds: number[]) => {
+      setGameState("loading");
+      setMode("custom");
+      setArtistName("");
+      setArtistId(null);
+      setCustomTrackIds(trackIds);
+      setQuestionCount(trackIds.length);
+      setCurrentIndex(0);
+      setCorrectCount(0);
+      setError(null);
+      setInfo(null);
+
+      try {
+        const result = await fetchQuiz("custom", trackIds.length, undefined, trackIds);
         setQuestions(result.questions);
         setInfo(result.info);
         setGameState("playing");
@@ -108,18 +159,17 @@ export function QuizGame() {
     setInfo(null);
 
     try {
-      const result = await fetchQuiz(
-        mode,
-        questionCount,
-        artistId || undefined
-      );
+      const result =
+        mode === "custom"
+          ? await fetchQuiz("custom", customTrackIds.length, undefined, customTrackIds)
+          : await fetchQuiz(mode, questionCount, artistId || undefined);
       setQuestions(result.questions);
       setInfo(result.info);
       setGameState("playing");
     } catch {
       setGameState("menu");
     }
-  }, [mode, questionCount, artistId, fetchQuiz]);
+  }, [mode, questionCount, artistId, customTrackIds, fetchQuiz]);
 
   const handleHome = useCallback(() => {
     setGameState("menu");
@@ -129,6 +179,9 @@ export function QuizGame() {
     setError(null);
     setInfo(null);
   }, []);
+
+  // Map mode for QuizQuestion: custom behaves like random (guess artist)
+  const questionMode = mode === "custom" ? "random" : mode;
 
   return (
     <main className="flex min-h-dvh flex-col items-center justify-center px-3 py-4 sm:px-6 sm:py-6">
@@ -147,7 +200,12 @@ export function QuizGame() {
           </div>
         )}
 
-        {gameState === "menu" && <ModeSelector onStartQuiz={startQuiz} />}
+        {gameState === "menu" && (
+          <ModeSelector
+            onStartQuiz={startQuiz}
+            onStartCustomQuiz={startCustomQuiz}
+          />
+        )}
 
         {gameState === "loading" && (
           <div className="flex flex-col items-center gap-6 py-20">
@@ -163,7 +221,9 @@ export function QuizGame() {
                 <span className="text-sm">{"正在准备题目..."}</span>
               </div>
               <span className="text-xs text-muted-foreground/60">
-                {"正在获取歌手完整曲库，请稍候"}
+                {mode === "custom"
+                  ? "正在获取所选歌曲信息，请稍候"
+                  : "正在获取歌手完整曲库，请稍候"}
               </span>
             </div>
           </div>
@@ -179,7 +239,7 @@ export function QuizGame() {
             albumCover={questions[currentIndex].albumCover}
             options={questions[currentIndex].options}
             correctAnswer={questions[currentIndex].correctAnswer}
-            mode={mode}
+            mode={questionMode}
             artistName={questions[currentIndex].artistName}
             artistImage={questions[currentIndex].artistImage}
             onAnswer={handleAnswer}

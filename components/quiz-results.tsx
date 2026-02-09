@@ -7,7 +7,7 @@ import { Trophy, Star, Heart, Flame, Zap, RotateCcw, Home } from "lucide-react";
 interface QuizResultsProps {
   correctCount: number;
   totalQuestions: number;
-  mode: "fan" | "random";
+  mode: "fan" | "random" | "custom";
   artistName?: string;
   onRestart: () => void;
   onHome: () => void;
@@ -21,7 +21,7 @@ interface FanLevel {
   bgColor: string;
 }
 
-function getFanLevel(accuracy: number, mode: "fan" | "random"): FanLevel {
+function getFanLevel(accuracy: number, mode: "fan" | "random" | "custom"): FanLevel {
   if (mode === "fan") {
     if (accuracy >= 90)
       return {
@@ -64,7 +64,7 @@ function getFanLevel(accuracy: number, mode: "fan" | "random"): FanLevel {
     };
   }
 
-  // Random mode
+  // Random / Custom mode
   if (accuracy >= 90)
     return {
       title: "音乐百科全书",
@@ -135,6 +135,13 @@ export function QuizResults({
         <div className="inline-flex items-center gap-2 rounded-full bg-accent/10 px-4 py-1.5">
           <span className="text-xs text-accent font-medium">
             {"随机专场"}
+          </span>
+        </div>
+      )}
+      {mode === "custom" && (
+        <div className="inline-flex items-center gap-2 rounded-full bg-chart-4/10 px-4 py-1.5">
+          <span className="text-xs text-chart-4 font-medium">
+            {"自选专场"}
           </span>
         </div>
       )}
