@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Music, Shuffle, Search, Loader2, Minus, Plus, X } from "lucide-react";
+import { Music, Shuffle, Search, Loader2, Minus, Plus, X, ListMusic } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { SongPicker, type PickedSong } from "./song-picker";
 
 interface DeezerArtist {
   id: number;
@@ -11,6 +12,8 @@ interface DeezerArtist {
   nb_fan: number;
 }
 
+type QuizMode = "fan" | "random" | "custom";
+
 interface ModeSelectorProps {
   onStartQuiz: (
     mode: "fan" | "random",
@@ -18,19 +21,17 @@ interface ModeSelectorProps {
     artistId?: number,
     artistName?: string
   ) => void;
+  onStartCustomQuiz: (trackIds: number[]) => void;
 }
 
-export function ModeSelector({ onStartQuiz }: ModeSelectorProps) {
-  const [selectedMode, setSelectedMode] = useState<"fan" | "random" | null>(
-    null
-  );
+export function ModeSelector({ onStartQuiz, onStartCustomQuiz }: ModeSelectorProps) {
+  const [selectedMode, setSelectedMode] = useState<QuizMode | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<DeezerArtist[]>([]);
   const [isSearching, setIsSearching] = useState(false);
-  const [selectedArtist, setSelectedArtist] = useState<DeezerArtist | null>(
-    null
-  );
+  const [selectedArtist, setSelectedArtist] = useState<DeezerArtist | null>(null);
   const [questionCount, setQuestionCount] = useState(10);
+  const [customSongs, setCustomSongs] = useState<PickedSong[]>([]);
 
   // Debounce timer and abort controller refs
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -69,7 +70,6 @@ export function ModeSelector({ onStartQuiz }: ModeSelectorProps) {
       }
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
-        // Request was aborted, ignore
         return;
       }
       if (!controller.signal.aborted) {
@@ -85,12 +85,10 @@ export function ModeSelector({ onStartQuiz }: ModeSelectorProps) {
   const handleInputChange = useCallback(
     (value: string) => {
       setSearchQuery(value);
-      // If artist is selected, clear it when user types again
       if (selectedArtist) {
         setSelectedArtist(null);
       }
 
-      // Debounce 350ms
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => {
         doSearch(value);
@@ -126,8 +124,8 @@ export function ModeSelector({ onStartQuiz }: ModeSelectorProps) {
         </p>
       </div>
 
-      {/* Mode cards */}
-      <div className="grid gap-3 grid-cols-2">
+      {/* Mode cards - 3 columns */}
+      <div className="grid gap-3 grid-cols-3">
         {/* Fan Mode */}
         <button
           type="button"
@@ -138,7 +136,7 @@ export function ModeSelector({ onStartQuiz }: ModeSelectorProps) {
             setSearchResults([]);
           }}
           className={cn(
-            "group flex flex-col items-center gap-2.5 sm:gap-3 rounded-xl border-2 p-3.5 sm:p-6 text-center transition-all cursor-pointer",
+            "group flex flex-col items-center gap-2 sm:gap-3 rounded-xl border-2 p-3 sm:p-5 text-center transition-all cursor-pointer",
             selectedMode === "fan"
               ? "border-primary bg-primary/5"
               : "border-border bg-card hover:border-primary/30"
@@ -146,20 +144,20 @@ export function ModeSelector({ onStartQuiz }: ModeSelectorProps) {
         >
           <div
             className={cn(
-              "flex h-10 w-10 sm:h-11 sm:w-11 items-center justify-center rounded-full transition-colors",
+              "flex h-9 w-9 sm:h-11 sm:w-11 items-center justify-center rounded-full transition-colors",
               selectedMode === "fan"
                 ? "bg-primary text-primary-foreground"
                 : "bg-secondary text-muted-foreground group-hover:bg-primary/10 group-hover:text-primary"
             )}
           >
-            <Search className="h-5 w-5" />
+            <Search className="h-4 w-4 sm:h-5 sm:w-5" />
           </div>
           <div>
-            <h3 className="font-semibold text-foreground text-sm sm:text-base">
+            <h3 className="font-semibold text-foreground text-xs sm:text-base">
               {"粉丝专场"}
             </h3>
-            <p className="mt-1 text-[11px] sm:text-xs text-muted-foreground leading-relaxed">
-              {"选择歌手，听歌猜歌名"}
+            <p className="mt-0.5 sm:mt-1 text-[10px] sm:text-xs text-muted-foreground leading-relaxed">
+              {"选歌手猜歌名"}
             </p>
           </div>
         </button>
@@ -172,7 +170,7 @@ export function ModeSelector({ onStartQuiz }: ModeSelectorProps) {
             setSelectedArtist(null);
           }}
           className={cn(
-            "group flex flex-col items-center gap-2.5 sm:gap-3 rounded-xl border-2 p-3.5 sm:p-6 text-center transition-all cursor-pointer",
+            "group flex flex-col items-center gap-2 sm:gap-3 rounded-xl border-2 p-3 sm:p-5 text-center transition-all cursor-pointer",
             selectedMode === "random"
               ? "border-accent bg-accent/5"
               : "border-border bg-card hover:border-accent/30"
@@ -180,27 +178,63 @@ export function ModeSelector({ onStartQuiz }: ModeSelectorProps) {
         >
           <div
             className={cn(
-              "flex h-10 w-10 sm:h-11 sm:w-11 items-center justify-center rounded-full transition-colors",
+              "flex h-9 w-9 sm:h-11 sm:w-11 items-center justify-center rounded-full transition-colors",
               selectedMode === "random"
                 ? "bg-accent text-accent-foreground"
                 : "bg-secondary text-muted-foreground group-hover:bg-accent/10 group-hover:text-accent"
             )}
           >
-            <Shuffle className="h-5 w-5" />
+            <Shuffle className="h-4 w-4 sm:h-5 sm:w-5" />
           </div>
           <div>
-            <h3 className="font-semibold text-foreground text-sm sm:text-base">
+            <h3 className="font-semibold text-foreground text-xs sm:text-base">
               {"随机专场"}
             </h3>
-            <p className="mt-1 text-[11px] sm:text-xs text-muted-foreground leading-relaxed">
-              {"随机热门歌曲，听歌猜歌手"}
+            <p className="mt-0.5 sm:mt-1 text-[10px] sm:text-xs text-muted-foreground leading-relaxed">
+              {"随机歌曲猜歌手"}
+            </p>
+          </div>
+        </button>
+
+        {/* Custom Mode */}
+        <button
+          type="button"
+          onClick={() => {
+            setSelectedMode("custom");
+            setSelectedArtist(null);
+            setSearchQuery("");
+            setSearchResults([]);
+          }}
+          className={cn(
+            "group flex flex-col items-center gap-2 sm:gap-3 rounded-xl border-2 p-3 sm:p-5 text-center transition-all cursor-pointer",
+            selectedMode === "custom"
+              ? "border-chart-4 bg-chart-4/5"
+              : "border-border bg-card hover:border-chart-4/30"
+          )}
+        >
+          <div
+            className={cn(
+              "flex h-9 w-9 sm:h-11 sm:w-11 items-center justify-center rounded-full transition-colors",
+              selectedMode === "custom"
+                ? "bg-chart-4 text-background"
+                : "bg-secondary text-muted-foreground group-hover:bg-chart-4/10 group-hover:text-chart-4"
+            )}
+          >
+            <ListMusic className="h-4 w-4 sm:h-5 sm:w-5" />
+          </div>
+          <div>
+            <h3 className="font-semibold text-foreground text-xs sm:text-base">
+              {"自选专场"}
+            </h3>
+            <p className="mt-0.5 sm:mt-1 text-[10px] sm:text-xs text-muted-foreground leading-relaxed">
+              {"自选歌曲出题"}
             </p>
           </div>
         </button>
       </div>
 
-      {/* Question count */}
-      {selectedMode && (
+      {/* Question count - only for fan and random modes */}
+      {(selectedMode === "fan" || selectedMode === "random") && (
         <div className="flex items-center justify-between rounded-xl border border-border bg-card px-4 py-3 animate-slide-up">
           <span className="text-sm text-muted-foreground">{"题目数量"}</span>
           <div className="flex items-center gap-3">
@@ -239,7 +273,6 @@ export function ModeSelector({ onStartQuiz }: ModeSelectorProps) {
               onChange={(e) => handleInputChange(e.target.value)}
               className="w-full rounded-xl border border-input bg-card py-3 pl-10 pr-10 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/60 focus:border-primary transition-all"
             />
-            {/* Clear / spinner icon */}
             {isSearching ? (
               <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />
             ) : (
@@ -354,6 +387,30 @@ export function ModeSelector({ onStartQuiz }: ModeSelectorProps) {
         >
           {"开始挑战"}
         </button>
+      )}
+
+      {/* Custom mode: song picker */}
+      {selectedMode === "custom" && (
+        <div className="flex flex-col gap-3 animate-slide-up">
+          <SongPicker songs={customSongs} onSongsChange={setCustomSongs} />
+
+          {customSongs.length > 0 && (
+            <button
+              type="button"
+              onClick={() =>
+                onStartCustomQuiz(customSongs.map((s) => s.id))
+              }
+              className="rounded-xl bg-chart-4 px-8 py-3.5 text-sm font-semibold text-background transition-all hover:bg-chart-4/90 active:scale-[0.98] animate-slide-up"
+            >
+              {"开始挑战"}
+              <span className="ml-1.5 text-xs opacity-70">
+                {"("}
+                {customSongs.length}
+                {" 题)"}
+              </span>
+            </button>
+          )}
+        </div>
       )}
     </div>
   );
